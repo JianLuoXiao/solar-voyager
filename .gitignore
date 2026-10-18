@@ -1,0 +1,14 @@
+# ===== 开发缓存与调试产物（不提交到仓库） =====
+_cdp_ref/
+screenshots/
+_work/
+qa/
+_check.log
+
+# ===== 本地工作区数据 =====
+.workbuddy/
+
+# ===== 系统 / 编辑器 =====
+.DS_Store
+Thumbs.db
+*.log

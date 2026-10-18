@@ -1,0 +1,9 @@
+{
+ "pair": "DTEEC_012340_1750_012195_1750_A01",
+ "size_m": 300.0,
+ "N": 512,
+ "relief_m": 54.26,
+ "vScale": 0.2764,
+ "dtm_px_m": 1.0121,
+ "note": "DEM 覆盖整块地面，UV 与 PlaneGeometry 0..1 一致；v 是图像行方向（v=0 → z=+half），h.bin 行主序 Float32"
+}

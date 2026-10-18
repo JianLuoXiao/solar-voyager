@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<!-- viewport 说明：
+     不要写 maximum-scale=1.0 / user-scalable=no。
+     实测这会让部分手机（尤其 iOS Safari）旋转屏幕后不重新排版 ——
+     用户转成横屏，画面还按竖屏的宽度算，看起来就是"不能自适应横屏"。
+     页面内部的捏合缩放已经在 JS 里单独处理（不会触发浏览器整页缩放），
+     所以放开这里的限制是安全的。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#03050b" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="screen-orientation" content="any" />
+<meta name="x5-orientation" content="auto" />
+<meta name="format-detection" content="telephone=no" />
+<title>STELLAR VOYAGER · 星际远航</title>
+<link rel="stylesheet" href="./css/style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "three": "./js/vendor/three/three.module.js",
+    "three/addons/": "./js/vendor/three/addons/"
+  }
+}
+</script>
+</head>
+<body>
+
+<!-- 渲染画布 -->
+<div id="viewport">
+  <canvas id="scene-view"></canvas>
+  <div id="vignette"></div>
+  <div id="scanlines"></div>
+</div>
+
+<!-- 天体标签层 -->
+<div id="labels"></div>
+
+<!-- 登陆/返航的白光转场 -->
+<div id="flash" aria-hidden="true"></div>
+
+<!-- ============ HUD ============ -->
+<div id="hud" class="hidden">
+
+  <!-- 顶部状态栏 -->
+  <header id="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="5" fill="#ffb45c" />
+          <ellipse cx="16" cy="16" rx="14" ry="5.2" fill="none" stroke="#7fe9ff" stroke-width="1" opacity=".75" transform="rotate(-22 16 16)" />
+          <circle cx="29" cy="11.5" r="1.6" fill="#7fe9ff" />
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>STELLAR VOYAGER</h1>
+        <p>星际远航 · 太阳系观测甲板</p>
+      </div>
+    </div>
+
+    <div class="readouts">
+      <div class="ro"><span class="ro-k">SCALE</span><span class="ro-v" id="ro-scale">1.00×</span></div>
+      <div class="ro"><span class="ro-k">SPD</span><span class="ro-v" id="ro-speed">0.0 u/s</span></div>
+      <div class="ro"><span class="ro-k">TIME</span><span class="ro-v" id="ro-time">1.0×</span></div>
+      <div class="ro"><span class="ro-k">FPS</span><span class="ro-v" id="ro-fps">--</span></div>
+    </div>
+    <div class="top-actions">
+      <button class="tbtn" id="btn-help" title="操作说明 (H)"><span class="tbtn-ico">?</span><span class="tbtn-txt"> 操作</span></button>
+      <button class="tbtn" id="btn-mute" title="背景音乐"><span class="tbtn-ico">♪</span><span class="tbtn-txt"> 音乐</span></button>
+    </div>
+  </header>
+
+  <!-- 准星 -->
+  <div id="crosshair" aria-hidden="true">
+    <svg viewBox="0 0 60 60">
+      <circle cx="30" cy="30" r="13" fill="none" stroke="currentColor" stroke-width="1" opacity=".38" />
+      <circle cx="30" cy="30" r="1.6" fill="currentColor" opacity=".9" />
+      <path d="M30 6 v9 M30 45 v9 M6 30 h9 M45 30 h9" stroke="currentColor" stroke-width="1" opacity=".55" />
+    </svg>
+  </div>
+  <div id="focus-tag" class="hidden"><b id="focus-name"></b><span id="focus-dist"></span></div>
+
+  <!-- 左侧：航图目录（桌面端） -->
+  <aside id="catalog" class="panel">
+    <div class="panel-head">
+      <span class="panel-title">航图目录</span>
+      <button class="collapse" data-target="catalog" title="折叠">–</button>
+    </div>
+    <div class="panel-body">
+      <div class="cat-group" id="cat-main"></div>
+    </div>
+  </aside>
+
+  <!-- ============ 移动端航图（仅在触屏显示） ============
+       桌面那块左侧面板在手机上被 display:none 了，却没有替代品，
+       结果是手机用户根本没法选行星飞去 —— 这里补上：
+       ① 底部一条横向快选带，点一下直接选中并飞过去；
+       ② 右侧「全部」按钮打开完整花名册（含卫星）。 -->
+  <!-- 注意：这里不能挂 .hidden —— 那个类是 display:none !important，
+       会把整个移动航图永远藏起来（上一版就踩了这个坑）。
+       桌面端要不要显示，交给 CSS 的触屏媒体查询去管。 -->
+  <div id="mobile-cat">
+    <!-- 完整花名册 -->
+    <div id="mcat-sheet" class="hidden">
+      <div class="mcat-head">
+        <span class="mcat-title">航图目录</span>
+        <button class="mcat-close" id="mcat-close" aria-label="关闭">×</button>
+      </div>
+      <div class="mcat-body">
+        <div class="cat-group" id="mcat-main"></div>
+      </div>
+    </div>
+
+    <!-- 底部横向快选带 -->
+    <div id="mcat-strip">
+      <div class="mcat-scroll" id="mcat-scroll"></div>
+      <button class="mcat-all" id="mcat-all">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+        <span>全部</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 右侧：天体档案 -->
+  <aside id="inspector" class="panel">
+    <div class="panel-head">
+      <span class="panel-title">天体档案</span>
+      <button class="collapse" data-target="inspector" title="折叠">–</button>
+    </div>
+    <div class="panel-body">
+      <div id="insp-empty" class="insp-empty">
+        <div class="ie-ring"></div>
+        <p>未选定目标</p>
+        <span>在星空中点击任意天体<br />或从左侧航图选择</span>
+      </div>
+      <div id="insp-content" class="hidden">
+        <div class="insp-hero">
+          <div class="insp-disc" id="insp-disc"></div>
+          <div class="insp-id">
+            <span class="insp-tag" id="insp-tag"></span>
+            <h2 id="insp-name"></h2>
+            <p id="insp-en"></p>
+          </div>
+        </div>
+        <p class="insp-desc" id="insp-desc"></p>
+        <p class="insp-detail" id="insp-detail"></p>
+        <div class="insp-stats" id="insp-stats"></div>
+        <div class="insp-actions">
+          <button class="abtn primary" id="btn-follow">进入轨道</button>
+          <button class="abtn" id="btn-goto">飞向目标</button>
+          <button class="abtn land" id="btn-land">登陆地表</button>
+        </div>
+        <div class="insp-moons" id="insp-moons"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 左下：控制台 -->
+  <section id="console" class="panel">
+    <div class="panel-head">
+      <span class="panel-title">控制台</span>
+      <button class="collapse" data-target="console" title="折叠">–</button>
+    </div>
+    <div class="panel-body">
+      <div class="ctl-row">
+        <label>时间流速<em id="v-timescale">1.0×</em></label>
+        <input type="range" id="s-timescale" min="0" max="100" value="20" />
+      </div>
+      <div class="ctl-row">
+        <label>空间尺度<em id="v-scale">1.00×</em></label>
+        <input type="range" id="s-scale" min="-100" max="100" value="0" />
+      </div>
+      <div class="ctl-row">
+        <label>星芒强度<em id="v-bloom">0.85</em></label>
+        <input type="range" id="s-bloom" min="0" max="200" value="85" />
+      </div>
+      <div class="ctl-toggles">
+        <button class="tg active" id="tg-orbits">轨道线</button>
+        <button class="tg active" id="tg-labels">标签</button>
+        <button class="tg active" id="tg-belt">碎石带</button>
+        <button class="tg" id="tg-rear">后视镜</button>
+      </div>
+      <div class="ctl-foot">
+        <button class="tg" id="btn-quality">画质：高</button>
+        <button class="tg" id="btn-reset">重置视角</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 地表模式：环境标牌 + 操作提示 -->
+  <section id="surface-hud" class="hidden">
+    <div class="sf-head">
+      <span class="sf-tag">地表模式 · SURFACE</span>
+      <button class="sf-exit" id="sf-exit">返航</button>
+    </div>
+    <h3 class="sf-name" id="sf-name">MARS</h3>
+    <p class="sf-loc" id="sf-loc"></p>
+    <p class="sf-brief" id="sf-brief"></p>
+    <div class="sf-tips sf-tips-desk">
+      <span class="tip-key">W A S D</span> 行走
+      <span class="tip-key">SHIFT</span> 奔跑
+      <span class="tip-key">空格</span> 跳跃
+      <span class="tip-key">鼠标</span> 环视
+      <span class="tip-key">ESC</span> 返回轨道
+    </div>
+    <div class="sf-tips sf-tips-touch">
+      <span class="tip-key">左摇杆</span> 行走
+      <span class="tip-key">拖动画面</span> 环视
+      <span class="tip-key">双击</span> 奔跑
+      <span class="tip-key">跳跃键</span> 起跳
+    </div>
+  </section>
+
+  <!-- ============ 触屏操控层（仅在触摸设备显示） ============ -->
+  <div id="touch-ctl" class="hidden" aria-hidden="true">
+    <div id="tpad">
+      <div class="tpad-ring"></div>
+      <div class="tpad-knob" id="tpad-knob"></div>
+      <span class="tpad-hint">移动</span>
+    </div>
+    <div id="tlook-hint"><i></i>拖动画面环视</div>
+    <div id="tbtns">
+      <button class="tbtn-round" id="t-jump" aria-label="跳跃">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6 12l6-6 6 6" /></svg>
+        <span>跳跃</span>
+      </button>
+      <button class="tbtn-round ghost" id="t-run" aria-label="奔跑切换">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3l-2 6h5l-6 12 1.5-8H7z" /></svg>
+        <span>奔跑</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- 底部提示条 -->
+  <footer id="tipbar">
+    <div class="tip-desk">
+      <span class="tip-key">W A S D</span> 推进
+      <span class="tip-key">Q E</span> 升降
+      <span class="tip-key">SHIFT</span> 加速
+      <span class="tip-key">拖拽</span> 转向
+      <span class="tip-key">滚轮</span> 缩放空间
+      <span class="tip-key">点击</span> 锁定视角并瞄准
+      <span class="tip-sep">|</span>
+      <span class="tip-key">1–9</span> 跳转行星
+      <span class="tip-key">TAB</span> 自由巡航
+      <span class="tip-key">ESC</span> 解锁
+    </div>
+    <div class="tip-touch">
+      <span class="tip-key">单指拖动</span> 转向
+      <span class="tip-key">双指捏合</span> 缩放空间
+      <span class="tip-key">点选天体</span> 查看档案
+    </div>
+  </footer>
+
+  <div id="toast"></div>
+</div>
+
+<!-- 帮助浮层 -->
+<div id="help" class="overlay hidden">
+  <div class="ov-card">
+    <button class="ov-close" id="help-close">×</button>
+    <h3>驾驶手册</h3>
+    <div class="ov-grid">
+      <div class="ov-col">
+        <h4>移动</h4>
+        <ul>
+          <li><b>W / S</b> 向前 / 后退推进</li>
+          <li><b>A / D</b> 左右平移</li>
+          <li><b>Q / E</b> 垂直升降</li>
+          <li><b>Shift</b> 曲速 boost（4.5×）</li>
+        </ul>
+      </div>
+      <div class="ov-col">
+        <h4>视角</h4>
+        <ul>
+          <li><b>按住鼠标拖拽</b> 转向</li>
+          <li><b>点击画面</b> 锁定指针，化作第一人称</li>
+          <li><b>滚轮</b> 缩放整个太阳系空间</li>
+          <li><b>Shift + 滚轮</b> 跟随时调整与天体的距离</li>
+          <li><b>Esc</b> 解除锁定</li>
+        </ul>
+      </div>
+      <div class="ov-col">
+        <h4>导航</h4>
+        <ul>
+          <li><b>1–9</b> 直接飞临九大行星</li>
+          <li><b>0</b> 太阳 · <b>10</b> 冥王星</li>
+          <li><b>点击天体</b> 显示档案并锁定</li>
+          <li><b>Tab</b> 脱离跟随，自由巡航</li>
+          <li><b>档案 → 登陆地表</b> 降落到星球表面</li>
+          <li><b>地表 ESC</b> 白光返航回到轨道</li>
+        </ul>
+      </div>
+      <div class="ov-col">
+        <h4>说明</h4>
+        <ul>
+          <li>距离与半径经过<b>艺术化压缩</b>，目的是看得见、看得爽</li>
+          <li>右侧档案里的天文数据才是<b>真实值</b></li>
+          <li>闲置 6 秒后飞船会自动缓慢漂移</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 加载舱 ============ -->
+<!-- 加载舱。文字刻意只留三样：
+     品牌小标（弱）→「这里是渐落晓的星际世界」（主角，最大）→ 进度状态（细）。
+     "正在生成星系数据"这种补充说明删掉了，它和进度百分比说的是同一件事，
+     留着只会跟署名抢视线。 -->
+<div id="manifest">
+  <div class="mf-inner">
+    <div class="mf-ring">
+      <svg viewBox="0 0 220 220">
+        <circle class="ring-bg" cx="110" cy="110" r="98" />
+        <circle class="ring-fg" id="mf-ring-progress" cx="110" cy="110" r="98" />
+      </svg>
+      <div class="mf-pct" id="mf-pct">0%</div>
+    </div>
+    <h2 class="mf-title">STELLAR VOYAGER</h2>
+    <p class="mf-owner">这里是渐落晓的星际世界</p>
+    <p class="mf-status" id="mf-status">系统自检中</p>
+    <button id="mf-launch" class="mf-btn hidden">启 程</button>
+    <p class="mf-hint hidden" id="mf-hint">建议戴上耳机，全屏浏览</p>
+  </div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+<noscript><p style="color:#fff;padding:2rem">请启用 JavaScript 以进入星际航行。</p></noscript>
+
+<!-- 分享提示浮层。
+     起因：把链接发给朋友后，朋友常反馈"打不开"。实测发现不是网站故障 ——
+     托管平台会用 UA 识别微信/企业微信内置浏览器，直接返回 403 拦截页
+     （标题「请在浏览器中打开」）。这是平台的安全策略，网页代码改不掉。
+     能做的是：检测到微信浏览器时，主动弹一层说明 + 一键复制链接按钮，
+     把"复制到浏览器打开"这条路指清楚，避免朋友以为网站挂了。 -->
+<div id="wx-tip" class="wx-tip hidden" role="dialog" aria-live="polite">
+  <div class="wx-card">
+    <div class="wx-ico" aria-hidden="true"></div>
+    <h2 class="wx-title">请在浏览器中打开</h2>
+    <p class="wx-desc">微信内暂不支持直接访问这个页面。<br />点下面的按钮复制链接，再粘贴到手机自带浏览器（Safari / Chrome）打开。</p>
+    <input id="wx-url" class="wx-url" readonly />
+    <button id="wx-copy" class="wx-btn">复制链接</button>
+    <p class="wx-ok hidden" id="wx-ok">已复制，去浏览器粘贴打开吧</p>
+    <p class="wx-note">小提示：右上角「…」→「在浏览器打开」也可以</p>
+  </div>
+</div>
+</body>
+</html>
